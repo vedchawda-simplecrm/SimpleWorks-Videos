@@ -9,6 +9,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { loadFont } from "@remotion/google-fonts/Montserrat";
+import { PreviewAudio } from "../components/PreviewAudio";
 
 const { fontFamily } = loadFont("normal", { weights: ["500", "600"] });
 
@@ -135,6 +136,7 @@ export const ConnectorScene: React.FC = () => {
 
   return (
     <AbsoluteFill style={{ backgroundColor: SCREEN_BG, opacity: exitOpacity }}>
+      <PreviewAudio track="audio-ConnectorScene" />
       {/* Camera stage - everything inside zooms/pans together */}
       <div
         style={{

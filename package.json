@@ -17,6 +17,7 @@
     "@types/react": "19.2.7",
     "@types/web": "0.0.166",
     "eslint": "9.19.0",
+    "playwright": "^1.63.0",
     "prettier": "3.8.1",
     "typescript": "5.9.3"
   },
@@ -24,7 +25,12 @@
     "dev": "remotion studio",
     "build": "remotion bundle",
     "upgrade": "remotion upgrade",
-    "lint": "eslint src && tsc"
+    "lint": "eslint src && tsc",
+    "export": "node scripts/export-video.mjs",
+    "export:all": "node scripts/export-video.mjs --all",
+    "export:60": "node scripts/export-video.mjs FullVideo --fps60",
+    "audio": "node scripts/build-audio-track.mjs",
+    "audio:check": "node scripts/check-audio.mjs"
   },
   "sideEffects": [
     "*.css"
