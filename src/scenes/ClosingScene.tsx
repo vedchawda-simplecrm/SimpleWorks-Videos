@@ -115,7 +115,7 @@ export const ClosingScene: React.FC = () => {
             fontWeight: 400,
             fontSize: 72,
             lineHeight: 1,
-            color: BRAND_BLUE,
+            color: TEXT_DARK,
             opacity: plusOpacity,
             transform: `scale(${plusScale})`,
           }}

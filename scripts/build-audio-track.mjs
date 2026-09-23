@@ -22,9 +22,15 @@ const TOTAL_FRAMES = 1485;
 const OUT = path.join(process.cwd(), "public", "assets", "audio");
 const MUSIC_MP3 = path.join(
   OUT,
-  "sonican-cooking-background-music-loop-486763.mp3",
+  "alexguz-funk-amp-breakbeat-upbeat-advertising-happy-cook-541097.mp3",
 );
-const MUSIC_PCM = path.join(OUT, "_music-decoded.wav");
+const TYPING_MP3 = path.join(
+  OUT,
+  "virtualzero-keyboard-typing-fast-371229.mp3",
+);
+const SUCCESS_MP3 = path.join(OUT, "freesound_community-success-83493.mp3");
+const CLICK_MP3 = path.join(OUT, "matthewvakaliuk73627-mouse-click-290204.mp3");
+const DECODE_TMP = path.join(OUT, "_decoded.wav");
 fs.mkdirSync(OUT, { recursive: true });
 
 let seed = 20260921;
@@ -36,85 +42,6 @@ const rand = () => {
 const secOf = (frame) => frame / FPS;
 
 // --- effects (mono) ------------------------------------------------------
-
-/**
- * A key press modelled in three parts, which is what makes it read as a
- * keyboard rather than a thud: a crisp contact click, a short body
- * resonance underneath it, and a quieter release click as the key returns.
- */
-const keyTick = (pitch = 1) => {
-  const n = Math.floor(0.14 * SR);
-  const out = new Float32Array(n);
-
-  // Band-passed noise burst - bright enough to sound like contact.
-  const addClick = (startSec, gain, brightness, decay) => {
-    const start = Math.floor(startSec * SR);
-    let lp1 = 0;
-    let lp2 = 0;
-    for (let i = 0; start + i < n; i++) {
-      const t = i / SR;
-      const noise = rand() * 2 - 1;
-      lp1 += (noise - lp1) * brightness;
-      lp2 += (lp1 - lp2) * 0.05;
-      out[start + i] += (lp1 - lp2) * Math.exp(-t * decay) * gain;
-    }
-  };
-
-  addClick(0, 0.5, 0.62, 400);
-
-  // Body: a damped resonance that gives the key some weight.
-  for (let i = 0; i < n; i++) {
-    const t = i / SR;
-    const env = Math.exp(-t * 85);
-    out[i] +=
-      (Math.sin(2 * Math.PI * 305 * pitch * t) * 0.5 +
-        Math.sin(2 * Math.PI * 174 * pitch * t) * 0.32) *
-      env *
-      0.2;
-  }
-
-  // Release, a beat later and duller.
-  addClick(0.052, 0.2, 0.45, 520);
-
-  return out;
-};
-
-/**
- * An unhurried typing rhythm: roughly 5-8 keystrokes a second with a little
- * natural variation, rather than a machine-gun run.
- */
-const typingRun = (seconds) => {
-  const out = new Float32Array(Math.floor(seconds * SR));
-  let t = 0.03;
-  while (t < seconds - 0.1) {
-    const tick = keyTick(0.9 + rand() * 0.25);
-    const off = Math.floor(t * SR);
-    const g = 0.62 + rand() * 0.2;
-    for (let i = 0; i < tick.length; i++) {
-      const j = off + i;
-      if (j < out.length) out[j] += tick[i] * g;
-    }
-    // Occasionally pause a touch longer, the way real typing breathes.
-    const pause = rand() < 0.18 ? 0.1 : 0;
-    t += 0.155 + rand() * 0.1 + pause;
-  }
-  return out;
-};
-
-const uiClick = () => {
-  const n = Math.floor(0.09 * SR);
-  const out = new Float32Array(n);
-  let lp = 0;
-  for (let i = 0; i < n; i++) {
-    const t = i / SR;
-    lp += (rand() * 2 - 1 - lp) * 0.5;
-    out[i] =
-      lp * Math.exp(-t * 260) * 0.4 +
-      Math.sin(2 * Math.PI * 900 * t) * Math.exp(-t * 90) * 0.3 +
-      Math.sin(2 * Math.PI * 1350 * t) * Math.exp(-t * 120) * 0.16;
-  }
-  return out;
-};
 
 const chime = () => {
   const n = Math.floor(1.1 * SR);
@@ -158,15 +85,16 @@ const stepTick = () => {
 
 // --- music ---------------------------------------------------------------
 
-const decodeMusic = () => {
-  if (!fs.existsSync(MUSIC_MP3)) {
-    throw new Error(`music track not found: ${MUSIC_MP3}`);
+/** Decodes any supplied mp3 to stereo float arrays. */
+const decodeMp3 = (file) => {
+  if (!fs.existsSync(file)) {
+    throw new Error(`audio file not found: ${file}`);
   }
   execSync(
-    `npx remotion ffmpeg -hide_banner -y -i "${MUSIC_MP3}" -ar ${SR} -ac 2 -c:a pcm_s16le "${MUSIC_PCM}"`,
+    `npx remotion ffmpeg -hide_banner -y -i "${file}" -ar ${SR} -ac 2 -c:a pcm_s16le "${DECODE_TMP}"`,
     { stdio: "ignore" },
   );
-  const b = fs.readFileSync(MUSIC_PCM);
+  const b = fs.readFileSync(DECODE_TMP);
   let p = 12;
   let off = 0;
   let len = 0;
@@ -187,8 +115,84 @@ const decodeMusic = () => {
     L[i] = b.readInt16LE(off + i * 4) / 32768;
     R[i] = b.readInt16LE(off + i * 4 + 2) / 32768;
   }
-  fs.rmSync(MUSIC_PCM, { force: true });
+  fs.rmSync(DECODE_TMP, { force: true });
   return { L, R, frames };
+};
+
+/**
+ * Trims leading silence from a supplied sample and caps its length, fading
+ * the tail so a long ring-out does not spill into the next scene.
+ */
+const sampleClip = (sample, maxSeconds, fadeOutSeconds) => {
+  const w = Math.floor(0.05 * SR);
+  const level = (s) => {
+    let x = 0;
+    for (let i = s; i < Math.min(s + w, sample.frames); i++) {
+      x += (sample.L[i] * sample.L[i] + sample.R[i] * sample.R[i]) / 2;
+    }
+    return Math.sqrt(x / w);
+  };
+  let start = 0;
+  while (start < sample.frames && level(start) < 0.01) start += w;
+
+  const len = Math.min(
+    Math.floor(maxSeconds * SR),
+    sample.frames - start,
+  );
+  const L = new Float32Array(len);
+  const R = new Float32Array(len);
+  for (let i = 0; i < len; i++) {
+    L[i] = sample.L[start + i];
+    R[i] = sample.R[start + i];
+  }
+  const fade = Math.min(len, Math.floor(fadeOutSeconds * SR));
+  for (let i = 0; i < fade; i++) {
+    const g = i / fade;
+    L[len - 1 - i] *= g;
+    R[len - 1 - i] *= g;
+  }
+  return { L, R };
+};
+
+/**
+ * Cuts a run of real keyboard typing out of the supplied sample, looping it
+ * if the run is longer than the recording, with short fades so the in and
+ * out points do not click.
+ */
+/** Rounds off the top end so a sample blends with the bed. */
+const soften = (clip, amount) => {
+  let l = 0;
+  let r = 0;
+  const L = new Float32Array(clip.L.length);
+  const R = new Float32Array(clip.R.length);
+  for (let i = 0; i < clip.L.length; i++) {
+    l += (clip.L[i] - l) * amount;
+    r += (clip.R[i] - r) * amount;
+    L[i] = l;
+    R[i] = r;
+  }
+  return { L, R };
+};
+
+const typingFromSample = (sample, seconds, startSec) => {
+  const len = Math.floor(seconds * SR);
+  const L = new Float32Array(len);
+  const R = new Float32Array(len);
+  const start = Math.floor(startSec * SR);
+  for (let i = 0; i < len; i++) {
+    const j = (start + i) % sample.frames;
+    L[i] = sample.L[j];
+    R[i] = sample.R[j];
+  }
+  const fade = Math.floor(0.035 * SR);
+  for (let i = 0; i < fade; i++) {
+    const g = i / fade;
+    L[i] *= g;
+    R[i] *= g;
+    L[len - 1 - i] *= g;
+    R[len - 1 - i] *= g;
+  }
+  return { L, R };
 };
 
 // --- cue sheet -----------------------------------------------------------
@@ -203,8 +207,10 @@ const CLOSING = 1365;
 const cues = [
   // IntroScene: types 6-42, question rises 72, answer lands 96,
   // logos 154, MCP pill 194.
-  { at: INTRO + 6, sound: "typingIntro", gain: 0.45 },
-  { at: INTRO + 96, sound: "chime", gain: 0.45 },
+  { at: INTRO + 6, sound: "typingIntro", gain: 0.62 },
+  // Starts 7 frames early because the sting peaks 0.25s in, so its impact
+  // lands exactly on frame 96 where "Now it can!" pops.
+  { at: INTRO + 89, sound: "success", gain: 0.34 },
   { at: INTRO + 194, sound: "step", gain: 0.4 },
 
   // ConnectorScene: clicks at 20/48/86, connected badge 96.
@@ -241,12 +247,15 @@ const n = Math.floor(totalSeconds * SR);
 const L = new Float32Array(n);
 const R = new Float32Array(n);
 
-// Music, looped with a crossfade at the seam so the join is inaudible.
+// Music enters only AFTER the intro, eases in slowly and stays low for the
+// rest of the film. MUSIC_START_FRAME is the first frame it is heard.
+const MUSIC_START_FRAME = CONNECTOR;
+const MUSIC_FADE_IN = 3.5;
+const MUSIC_FADE_OUT = 1.5;
 {
-  const music = decodeMusic();
+  const music = decodeMp3(MUSIC_MP3);
 
-  // The supplied track fades out at the end. Looping the whole file would
-  // replay that silence, so find the musical span first and loop only that.
+  // Skip any silent head/tail on the source so the fade-in starts on music.
   const win = Math.floor(0.05 * SR);
   const level = (at) => {
     let sum = 0;
@@ -255,25 +264,19 @@ const R = new Float32Array(n);
     }
     return Math.sqrt(sum / win);
   };
-  const threshold = 0.02;
   let bodyStart = 0;
-  while (bodyStart < music.frames && level(bodyStart) < threshold) {
-    bodyStart += win;
-  }
+  while (bodyStart < music.frames && level(bodyStart) < 0.02) bodyStart += win;
   let bodyEnd = music.frames - win;
-  while (bodyEnd > bodyStart && level(bodyEnd) < threshold) {
-    bodyEnd -= win;
-  }
+  while (bodyEnd > bodyStart && level(bodyEnd) < 0.02) bodyEnd -= win;
   const bodyLen = bodyEnd - bodyStart;
-  console.log(
-    `music body: ${(bodyStart / SR).toFixed(2)}s - ${(bodyEnd / SR).toFixed(2)}s (${(bodyLen / SR).toFixed(2)}s usable of ${(music.frames / SR).toFixed(2)}s)`,
-  );
 
-  // Crossfade proportional to the loop length: a long fade would smear a
-  // short loop-designed track, but a short one still hides the seam.
-  const xf = Math.floor(Math.min(1.5 * SR, bodyLen * 0.04));
-  console.log(`loop crossfade: ${(xf / SR).toFixed(2)}s`);
-  let pos = 0;
+  const startSample = Math.floor(secOf(MUSIC_START_FRAME) * SR);
+  const need = n - startSample;
+  const xf = Math.floor(Math.min(0.35 * SR, bodyLen * 0.02));
+
+  // Fill from the intro's end to the end of the film, looping only if the
+  // track is shorter than what is left to cover.
+  let pos = startSample;
   let first = true;
   while (pos < n) {
     for (let i = 0; i < bodyLen; i++) {
@@ -289,39 +292,52 @@ const R = new Float32Array(n);
     first = false;
   }
 
-  // Set the bed's level before effects go on top. Kept deliberately low so
-  // the typing, clicks and chimes stay clearly audible over it.
+  // Level: measured over the stretch music actually plays, kept low so the
+  // effects stay clearly on top.
   let sum = 0;
-  for (let i = 0; i < n; i++) sum += (L[i] * L[i] + R[i] * R[i]) / 2;
-  const rms = Math.sqrt(sum / n);
+  for (let i = startSample; i < n; i++) sum += (L[i] * L[i] + R[i] * R[i]) / 2;
+  const rms = Math.sqrt(sum / need);
   const target = 0.015;
   const g = rms > 0 ? target / rms : 1;
-  for (let i = 0; i < n; i++) {
+  for (let i = startSample; i < n; i++) {
     L[i] *= g;
     R[i] *= g;
   }
-  // Fade the BED in and out - not the finished mix - so the opening
-  // keystrokes and the closing chime are not swallowed by the fade.
-  const musicFade = Math.floor(1.2 * SR);
-  for (let i = 0; i < musicFade; i++) {
-    const f = i / musicFade;
-    L[i] *= f;
-    R[i] *= f;
-    L[n - 1 - i] *= f;
-    R[n - 1 - i] *= f;
+
+  // Slow rise as it comes in, gentle fall at the very end.
+  const fadeIn = Math.floor(MUSIC_FADE_IN * SR);
+  for (let i = 0; i < fadeIn; i++) {
+    const j = startSample + i;
+    if (j >= n) break;
+    const e = (i / fadeIn) ** 2; // eased, so it creeps in rather than ramps
+    L[j] *= e;
+    R[j] *= e;
+  }
+  const fadeOut = Math.floor(MUSIC_FADE_OUT * SR);
+  for (let i = 0; i < fadeOut; i++) {
+    const e = i / fadeOut;
+    L[n - 1 - i] *= e;
+    R[n - 1 - i] *= e;
   }
 
   console.log(
-    `music: ${(music.frames / SR).toFixed(1)}s looped to ${totalSeconds}s, gain x${g.toFixed(2)}`,
+    `music: enters at frame ${MUSIC_START_FRAME} (${secOf(MUSIC_START_FRAME).toFixed(1)}s), ${MUSIC_FADE_IN}s fade-in, source ${(bodyLen / SR).toFixed(1)}s, gain x${g.toFixed(2)}`,
   );
 }
 
+const typingSample = decodeMp3(TYPING_MP3);
+const successSample = decodeMp3(SUCCESS_MP3);
+const clickSample = decodeMp3(CLICK_MP3);
 const bank = {
-  click: uiClick(),
+  // Real mouse click; impact sits ~10ms in after trimming, well under a frame.
+  click: sampleClip(clickSample, 0.25, 0.06),
   chime: chime(),
   step: stepTick(),
-  typingIntro: typingRun((42 - 6) / FPS),
-  typingPrompt: typingRun((132 - 30) / FPS),
+  // Supplied success sting, trimmed so its tail clears the scene.
+  success: soften(sampleClip(successSample, 1.9, 0.9), 0.22),
+  // Two different stretches of the recording so the shots do not repeat.
+  typingIntro: typingFromSample(typingSample, (42 - 6) / FPS, 0.35),
+  typingPrompt: typingFromSample(typingSample, (132 - 30) / FPS, 2.6),
 };
 
 // Effects are lifted as a group so they sit clearly above the bed, and the
@@ -329,8 +345,9 @@ const bank = {
 // is spread thinly across a window rather than concentrated in a hit.
 const SFX_GAIN = 2.0;
 const SOUND_GAIN = {
-  typingIntro: 3.4,
-  typingPrompt: 3.4,
+  success: 1.0,
+  typingIntro: 1.35,
+  typingPrompt: 1.35,
   step: 1.9,
   click: 1.0,
   chime: 1.0,
@@ -341,11 +358,14 @@ for (const cue of cues) {
   if (!src) throw new Error(`unknown sound: ${cue.sound}`);
   const off = Math.floor(secOf(cue.at) * SR);
   const g = cue.gain * SFX_GAIN * (SOUND_GAIN[cue.sound] ?? 1);
-  for (let i = 0; i < src.length; i++) {
+  const stereo = !(src instanceof Float32Array);
+  const srcL = stereo ? src.L : src;
+  const srcR = stereo ? src.R : src;
+  for (let i = 0; i < srcL.length; i++) {
     const j = off + i;
     if (j >= 0 && j < n) {
-      L[j] += src[i] * g;
-      R[j] += src[i] * g;
+      L[j] += srcL[i] * g;
+      R[j] += srcR[i] * g;
     }
   }
 }
@@ -359,6 +379,17 @@ for (let i = 0; i < fade; i++) {
   R[i] *= g;
   L[n - 1 - i] *= g;
   R[n - 1 - i] *= g;
+}
+
+// Soft-limit before normalising. The real keyboard sample has sharp
+// transients; without this they alone would set the ceiling and the
+// normaliser would pull the music and everything else down with it.
+{
+  const knee = 0.8;
+  for (let i = 0; i < n; i++) {
+    L[i] = Math.tanh(L[i] / knee) * knee;
+    R[i] = Math.tanh(R[i] / knee) * knee;
+  }
 }
 
 // Lift to a normal listening level: peak just under -3dBFS.

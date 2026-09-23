@@ -51,12 +51,24 @@ console.log(
   `peak ${(20 * Math.log10(peak)).toFixed(1)}dBFS   rms ${(20 * Math.log10(rms(0, frames))).toFixed(1)}dBFS   stereo width ${(width / frames).toFixed(4)}`,
 );
 
-// Continuity: no near-silent stretch outside the top/tail fades.
+// Continuity of the music bed. It deliberately does not start until after
+// the intro, so the scan begins once the fade-in has completed. A single
+// quiet window is just a rest in the music; only a run of them is a gap.
+const MUSIC_SETTLED = 12.5;
+const overall = rms(at(MUSIC_SETTLED), frames - at(2));
+const silenceFloor = overall * 0.08;
 const win = Math.floor(0.1 * SR);
 const quiet = [];
-for (let s = at(1.5); s < frames - at(1.5) - win; s += win) {
-  if (rms(s, s + win) < 0.004) quiet.push((s / SR).toFixed(2));
+let run = [];
+for (let s = at(MUSIC_SETTLED); s < frames - at(1.5) - win; s += win) {
+  if (rms(s, s + win) < silenceFloor) {
+    run.push((s / SR).toFixed(2));
+  } else {
+    if (run.length >= 3) quiet.push(`${run[0]}-${run[run.length - 1]}`);
+    run = [];
+  }
 }
+if (run.length >= 3) quiet.push(`${run[0]}-${run[run.length - 1]}`);
 console.log(
   `continuity: ${quiet.length ? `GAPS at ${quiet.join(", ")}` : "no gaps"}`,
 );
@@ -65,13 +77,14 @@ console.log(
 // with no cue scheduled; effect windows are taken around each cue.
 const musicOnly =
   [
-    [3.6, 4.6],
-    [10.5, 11.5],
-    [28.0, 29.0],
-    [40.0, 41.0],
+    [13.0, 14.5],
+    [24.5, 26.0],
+    [30.0, 32.0],
+    [35.0, 37.0],
+    [44.0, 45.5],
   ]
     .map(([a, z]) => rms(at(a), at(z)))
-    .reduce((x, y) => x + y) / 4;
+    .reduce((x, y) => x + y, 0) / 5;
 
 const over = (a, z) => {
   const total = rms(a, z);
@@ -84,10 +97,11 @@ const over = (a, z) => {
 const musicPeak = (() => {
   let p = 0;
   for (const [a, z] of [
-    [3.6, 4.6],
-    [10.5, 11.5],
-    [28.0, 29.0],
-    [40.0, 41.0],
+    [13.0, 14.5],
+    [24.5, 26.0],
+    [30.0, 32.0],
+    [35.0, 37.0],
+    [44.0, 45.5],
   ]) {
     for (let i = at(a); i < at(z); i++) {
       p = Math.max(p, Math.abs(L(i)), Math.abs(R(i)));
@@ -108,6 +122,7 @@ const checks = [
   ["send click", frameAt(579), frameAt(584)],
   ["tool step", frameAt(603), frameAt(610)],
   ["answer chime", frameAt(673), frameAt(687)],
+  ["now it can (success)", frameAt(89), frameAt(140)],
 ];
 console.log(
   `music-only rms ${musicOnly.toFixed(4)}  peak ${musicPeak.toFixed(3)}`,

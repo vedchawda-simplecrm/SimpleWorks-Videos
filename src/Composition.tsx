@@ -72,7 +72,7 @@ export const MyComposition = () => {
         id="FullVideo"
         component={FullVideo}
         durationInFrames={FULL_VIDEO_DURATION}
-        fps={FPS}
+        fps={30}
         width={WIDTH}
         height={HEIGHT}
       />
