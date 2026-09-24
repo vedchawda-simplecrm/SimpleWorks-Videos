@@ -6,6 +6,18 @@ import { OpportunityInsightsScene } from "./scenes/OpportunityInsightsScene";
 import { OpportunityQuestionsScene } from "./scenes/OpportunityQuestionsScene";
 import { ClosingScene } from "./scenes/ClosingScene";
 import { FullVideo, FULL_VIDEO_DURATION } from "./scenes/FullVideo";
+import { RyabotVideo, RYABOT_SCENE_LAYOUT, RYABOT_VIDEO_DURATION } from "./videos/ryabot/RyabotVideo";
+import {
+  RyabotLoaderFull,
+  RyabotLoaderIdle,
+  RyabotLoaderIntro,
+} from "./videos/ryabot/loader/RyabotLoader";
+import {
+  FULL_FRAMES,
+  IDLE_FRAMES,
+  INTRO_FRAMES,
+  LOADER_SIZE,
+} from "./videos/ryabot/loader/pose";
 
 export const FPS = 30;
 export const WIDTH = 1920;
@@ -64,6 +76,53 @@ export const MyComposition = () => {
         id="ClosingScene"
         component={ClosingScene}
         durationInFrames={CLOSING_DURATION_IN_FRAMES}
+        fps={FPS}
+        width={WIDTH}
+        height={HEIGHT}
+      />
+      {/* R-YaBot AI-processing loader. Square, transparent background,
+          rendered with an alpha codec - see npm run loader:webm. */}
+      <Composition
+        id="RyabotLoaderIntro"
+        component={RyabotLoaderIntro}
+        durationInFrames={INTRO_FRAMES}
+        fps={FPS}
+        width={LOADER_SIZE}
+        height={LOADER_SIZE}
+      />
+      <Composition
+        id="RyabotLoaderIdle"
+        component={RyabotLoaderIdle}
+        durationInFrames={IDLE_FRAMES}
+        fps={FPS}
+        width={LOADER_SIZE}
+        height={LOADER_SIZE}
+      />
+      <Composition
+        id="RyabotLoaderFull"
+        component={RyabotLoaderFull}
+        durationInFrames={FULL_FRAMES}
+        fps={FPS}
+        width={LOADER_SIZE}
+        height={LOADER_SIZE}
+      />
+
+      {/* The ryabot spot - a separate cut, not part of FullVideo. */}
+      {RYABOT_SCENE_LAYOUT.map(({ id, duration, Component }) => (
+        <Composition
+          key={id}
+          id={id}
+          component={Component}
+          durationInFrames={duration}
+          fps={FPS}
+          width={WIDTH}
+          height={HEIGHT}
+        />
+      ))}
+      <Composition
+        id="RyabotVideo"
+        component={RyabotVideo}
+        durationInFrames={RYABOT_VIDEO_DURATION}
         fps={FPS}
         width={WIDTH}
         height={HEIGHT}

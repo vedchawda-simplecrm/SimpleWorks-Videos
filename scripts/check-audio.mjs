@@ -3,14 +3,23 @@
  * continuity (no gaps), headroom, stereo, and that each effect is audible
  * over the music bed.
  *
- *   node scripts/check-audio.mjs
+ *   node scripts/check-audio.mjs [video-id]
+ *
+ * The windows it measures come from that video entry in video-config.mjs.
  */
 import fs from "node:fs";
 import path from "node:path";
+import { DEFAULT_VIDEO, FPS, getVideo } from "./video-config.mjs";
 
 const SR = 44100;
-const FPS = 30;
-const file = path.join(process.cwd(), "public", "assets", "audio", "full-audio.wav");
+const video = getVideo(process.argv[2] || DEFAULT_VIDEO);
+const file = path.join(
+  process.cwd(),
+  "public",
+  "assets",
+  "audio",
+  `${video.audioTrack}.wav`,
+);
 const b = fs.readFileSync(file);
 
 let p = 12;
@@ -54,7 +63,7 @@ console.log(
 // Continuity of the music bed. It deliberately does not start until after
 // the intro, so the scan begins once the fade-in has completed. A single
 // quiet window is just a rest in the music; only a run of them is a gap.
-const MUSIC_SETTLED = 12.5;
+const MUSIC_SETTLED = video.musicSettledAt;
 const overall = rms(at(MUSIC_SETTLED), frames - at(2));
 const silenceFloor = overall * 0.08;
 const win = Math.floor(0.1 * SR);
@@ -76,15 +85,9 @@ console.log(
 // Effects should sit clearly above the bed. Music-only windows are stretches
 // with no cue scheduled; effect windows are taken around each cue.
 const musicOnly =
-  [
-    [13.0, 14.5],
-    [24.5, 26.0],
-    [30.0, 32.0],
-    [35.0, 37.0],
-    [44.0, 45.5],
-  ]
+  video.quietWindows
     .map(([a, z]) => rms(at(a), at(z)))
-    .reduce((x, y) => x + y, 0) / 5;
+    .reduce((x, y) => x + y, 0) / video.quietWindows.length;
 
 const over = (a, z) => {
   const total = rms(a, z);
@@ -96,13 +99,7 @@ const over = (a, z) => {
 // judged on peak against the music's own peak instead.
 const musicPeak = (() => {
   let p = 0;
-  for (const [a, z] of [
-    [13.0, 14.5],
-    [24.5, 26.0],
-    [30.0, 32.0],
-    [35.0, 37.0],
-    [44.0, 45.5],
-  ]) {
+  for (const [a, z] of video.quietWindows) {
     for (let i = at(a); i < at(z); i++) {
       p = Math.max(p, Math.abs(L(i)), Math.abs(R(i)));
     }
@@ -116,14 +113,11 @@ const peakOver = (a, z) => {
   return p / musicPeak;
 };
 
-const checks = [
-  ["typing (intro)", frameAt(10), frameAt(40)],
-  ["typing (prompt)", frameAt(495), frameAt(560)],
-  ["send click", frameAt(579), frameAt(584)],
-  ["tool step", frameAt(603), frameAt(610)],
-  ["answer chime", frameAt(673), frameAt(687)],
-  ["now it can (success)", frameAt(89), frameAt(140)],
-];
+const checks = video.audibilityChecks.map(([name, a, z]) => [
+  name,
+  frameAt(a),
+  frameAt(z),
+]);
 console.log(
   `music-only rms ${musicOnly.toFixed(4)}  peak ${musicPeak.toFixed(3)}`,
 );

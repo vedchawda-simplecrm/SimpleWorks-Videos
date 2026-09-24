@@ -1,0 +1,69 @@
+/* Presentation for <RyabotLoading>. Hand-written - unlike ryabot-loader.css,
+   which is generated and must not be edited.
+
+   The overlay is light by default and stays light. It deliberately does NOT
+   follow prefers-color-scheme: that reports the OS setting, not this app's
+   theme, so a light CRM on a dark-mode laptop would get a black overlay.
+   To go dark, opt in explicitly - see the bottom of this file. */
+
+.ryabot-loading {
+  /* Override these to restyle; no need to touch the rules below. */
+  --ryabot-overlay-bg: rgba(255, 255, 255, 0.72);
+  --ryabot-overlay-blur: 3px;
+  --ryabot-caption-color: #6b6458;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  /* Faded rather than unmounted, so the loader does not vanish on the frame
+     the data lands - and so the element survives, which is what keeps the
+     settle from replaying on the next load. */
+  opacity: 0;
+  transition: opacity 180ms ease;
+  pointer-events: none;
+}
+
+.ryabot-loading[data-visible="true"] {
+  opacity: 1;
+}
+
+/* Covers the list it belongs to. The parent needs position: relative. */
+.ryabot-loading--overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: var(--ryabot-overlay-bg);
+  backdrop-filter: blur(var(--ryabot-overlay-blur));
+  -webkit-backdrop-filter: blur(var(--ryabot-overlay-blur));
+}
+
+/* Without backdrop-filter the rows behind stay sharp and the overlay reads as
+   a weak wash, so lean on opacity instead to keep them legibly out of focus. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .ryabot-loading--overlay {
+    background: rgba(255, 255, 255, 0.88);
+  }
+}
+
+.ryabot-loading__caption {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--ryabot-caption-color);
+}
+
+/* Opt in per app, e.g. <RyabotLoading className="ryabot-loading--dark" />, or
+   scope it to your own theme selector:
+     [data-theme="dark"] .ryabot-loading { ...the same two custom properties }
+*/
+.ryabot-loading--dark {
+  --ryabot-overlay-bg: rgba(20, 19, 17, 0.66);
+  --ryabot-caption-color: #a8a093;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ryabot-loading {
+    transition: none;
+  }
+}

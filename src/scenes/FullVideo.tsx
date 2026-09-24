@@ -22,7 +22,12 @@ export const FULL_VIDEO_DURATION = 1485;
 
 export const FullVideo: React.FC = () => {
   return (
-    <AbsoluteFill style={{ backgroundColor: "#000000" }}>
+    <AbsoluteFill
+      style={{
+        backgroundColor: "#000000"
+      }}
+      from={-15}
+    >
       {/* One continuous track for the whole cut, so the music never
           restarts at a scene boundary. The scenes' own per-scene tracks are
           suppressed by the context below. Renders stay silent either way -

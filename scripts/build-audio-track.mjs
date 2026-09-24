@@ -1,37 +1,30 @@
 /**
- * Builds the finished stereo soundtrack for the video.
+ * Builds the finished stereo soundtrack for a video.
  *
- * Music is the supplied corporate bed; the effects are synthesised. Audio
- * is assembled here rather than with Remotion's <Audio> because this
+ * Audio is assembled here rather than with Remotion's <Audio> because this
  * Remotion (4.0.526) / Node 24 / Windows combination crashes on any RENDER
- * of a composition containing an audio asset. Scenes still reference these
- * tracks through <PreviewAudio>, which plays them in Studio only.
+ * of a composition containing an audio asset. Scenes reference these tracks
+ * through <PreviewAudio>, which plays them in Studio only; the renderer
+ * never sees them and the track is muxed on afterwards.
  *
- *   node scripts/build-audio-track.mjs
+ *   node scripts/build-audio-track.mjs [video-id]
  *
- * CUE TIMINGS MIRROR THE SCENE CONSTANTS. If a scene's timing changes,
- * update the matching cue below.
+ * Each video's cue sheet and scene layout live in scripts/video-config.mjs.
+ * CUE FRAMES MIRROR THE SCENE TIMING CONSTANTS - if a scene's timing
+ * changes, update the matching cue there.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { DEFAULT_VIDEO, FPS, SAMPLES, getVideo } from "./video-config.mjs";
 
 const SR = 44100;
-const FPS = 30;
-const TOTAL_FRAMES = 1485;
 const OUT = path.join(process.cwd(), "public", "assets", "audio");
-const MUSIC_MP3 = path.join(
-  OUT,
-  "alexguz-funk-amp-breakbeat-upbeat-advertising-happy-cook-541097.mp3",
-);
-const TYPING_MP3 = path.join(
-  OUT,
-  "virtualzero-keyboard-typing-fast-371229.mp3",
-);
-const SUCCESS_MP3 = path.join(OUT, "freesound_community-success-83493.mp3");
-const CLICK_MP3 = path.join(OUT, "matthewvakaliuk73627-mouse-click-290204.mp3");
 const DECODE_TMP = path.join(OUT, "_decoded.wav");
 fs.mkdirSync(OUT, { recursive: true });
+
+const video = getVideo(process.argv[2] || DEFAULT_VIDEO);
+const secOf = (frame) => frame / FPS;
 
 let seed = 20260921;
 const rand = () => {
@@ -39,9 +32,7 @@ const rand = () => {
   return seed / 4294967296;
 };
 
-const secOf = (frame) => frame / FPS;
-
-// --- effects (mono) ------------------------------------------------------
+// --- synthesised effects -------------------------------------------------
 
 const chime = () => {
   const n = Math.floor(1.1 * SR);
@@ -83,15 +74,14 @@ const stepTick = () => {
   return out;
 };
 
-// --- music ---------------------------------------------------------------
+// --- supplied samples ----------------------------------------------------
 
 /** Decodes any supplied mp3 to stereo float arrays. */
 const decodeMp3 = (file) => {
-  if (!fs.existsSync(file)) {
-    throw new Error(`audio file not found: ${file}`);
-  }
+  const full = path.join(OUT, file);
+  if (!fs.existsSync(full)) throw new Error(`audio file not found: ${full}`);
   execSync(
-    `npx remotion ffmpeg -hide_banner -y -i "${file}" -ar ${SR} -ac 2 -c:a pcm_s16le "${DECODE_TMP}"`,
+    `npx remotion ffmpeg -hide_banner -y -i "${full}" -ar ${SR} -ac 2 -c:a pcm_s16le "${DECODE_TMP}"`,
     { stdio: "ignore" },
   );
   const b = fs.readFileSync(DECODE_TMP);
@@ -108,7 +98,7 @@ const decodeMp3 = (file) => {
     }
     p += 8 + size + (size % 2);
   }
-  const frames = Math.floor(len / 4); // stereo 16-bit
+  const frames = Math.floor(len / 4);
   const L = new Float32Array(frames);
   const R = new Float32Array(frames);
   for (let i = 0; i < frames; i++) {
@@ -119,26 +109,27 @@ const decodeMp3 = (file) => {
   return { L, R, frames };
 };
 
-/**
- * Trims leading silence from a supplied sample and caps its length, fading
- * the tail so a long ring-out does not spill into the next scene.
- */
-const sampleClip = (sample, maxSeconds, fadeOutSeconds) => {
-  const w = Math.floor(0.05 * SR);
-  const level = (s) => {
-    let x = 0;
-    for (let i = s; i < Math.min(s + w, sample.frames); i++) {
-      x += (sample.L[i] * sample.L[i] + sample.R[i] * sample.R[i]) / 2;
+/** Finds the non-silent span of a sample. */
+const contentSpan = (sample, threshold = 0.02) => {
+  const win = Math.floor(0.05 * SR);
+  const level = (at) => {
+    let sum = 0;
+    for (let i = at; i < Math.min(at + win, sample.frames); i++) {
+      sum += (sample.L[i] * sample.L[i] + sample.R[i] * sample.R[i]) / 2;
     }
-    return Math.sqrt(x / w);
+    return Math.sqrt(sum / win);
   };
   let start = 0;
-  while (start < sample.frames && level(start) < 0.01) start += w;
+  while (start < sample.frames && level(start) < threshold) start += win;
+  let end = sample.frames - win;
+  while (end > start && level(end) < threshold) end -= win;
+  return { start, end, length: end - start };
+};
 
-  const len = Math.min(
-    Math.floor(maxSeconds * SR),
-    sample.frames - start,
-  );
+/** Trims leading silence and caps length, fading the tail. */
+const sampleClip = (sample, maxSeconds, fadeOutSeconds) => {
+  const { start } = contentSpan(sample, 0.01);
+  const len = Math.min(Math.floor(maxSeconds * SR), sample.frames - start);
   const L = new Float32Array(len);
   const R = new Float32Array(len);
   for (let i = 0; i < len; i++) {
@@ -154,11 +145,6 @@ const sampleClip = (sample, maxSeconds, fadeOutSeconds) => {
   return { L, R };
 };
 
-/**
- * Cuts a run of real keyboard typing out of the supplied sample, looping it
- * if the run is longer than the recording, with short fades so the in and
- * out points do not click.
- */
 /** Rounds off the top end so a sample blends with the bed. */
 const soften = (clip, amount) => {
   let l = 0;
@@ -174,6 +160,7 @@ const soften = (clip, amount) => {
   return { L, R };
 };
 
+/** Cuts a run of typing from the recording, looping if the run is longer. */
 const typingFromSample = (sample, seconds, startSec) => {
   const len = Math.floor(seconds * SR);
   const L = new Float32Array(len);
@@ -195,117 +182,51 @@ const typingFromSample = (sample, seconds, startSec) => {
   return { L, R };
 };
 
-// --- cue sheet -----------------------------------------------------------
-// Scene offsets match SCENE_LAYOUT in src/scenes/FullVideo.tsx.
-const INTRO = 0;
-const CONNECTOR = 240;
-const PROMPT = 435;
-const INSIGHTS = 705;
-const QUESTIONS = 1125;
-const CLOSING = 1365;
-
-const cues = [
-  // IntroScene: types 6-42, question rises 72, answer lands 96,
-  // logos 154, MCP pill 194.
-  { at: INTRO + 6, sound: "typingIntro", gain: 0.62 },
-  // Starts 7 frames early because the sting peaks 0.25s in, so its impact
-  // lands exactly on frame 96 where "Now it can!" pops.
-  { at: INTRO + 89, sound: "success", gain: 0.34 },
-  { at: INTRO + 194, sound: "step", gain: 0.4 },
-
-  // ConnectorScene: clicks at 20/48/86, connected badge 96.
-  { at: CONNECTOR + 20, sound: "click", gain: 0.55 },
-  { at: CONNECTOR + 48, sound: "click", gain: 0.55 },
-  { at: CONNECTOR + 86, sound: "click", gain: 0.55 },
-  { at: CONNECTOR + 96, sound: "chime", gain: 0.5 },
-
-  // OpportunityPromptScene: types 30-132, send 144, view swap 178,
-  // tool steps from 168 every 17, answer 238.
-  { at: PROMPT + 30, sound: "typingPrompt", gain: 0.45 },
-  { at: PROMPT + 144, sound: "click", gain: 0.6 },
-  { at: PROMPT + 168, sound: "step", gain: 0.32 },
-  { at: PROMPT + 185, sound: "step", gain: 0.32 },
-  { at: PROMPT + 202, sound: "step", gain: 0.32 },
-  { at: PROMPT + 219, sound: "step", gain: 0.32 },
-  { at: PROMPT + 238, sound: "chime", gain: 0.5 },
-
-  // OpportunityInsightsScene: tooltip 96, beat changes 180 and 330.
-  { at: INSIGHTS + 96, sound: "step", gain: 0.26 },
-
-  // OpportunityQuestionsScene: stack in 10, card changes 70 and 152.
-  { at: QUESTIONS + 70, sound: "step", gain: 0.3 },
-  { at: QUESTIONS + 152, sound: "step", gain: 0.3 },
-
-  // ClosingScene: headline 5, plus lands 56.
-  { at: CLOSING + 56, sound: "chime", gain: 0.5 },
-];
-
 // --- mix -----------------------------------------------------------------
 
-const totalSeconds = TOTAL_FRAMES / FPS;
+const totalSeconds = video.totalFrames / FPS;
 const n = Math.floor(totalSeconds * SR);
 const L = new Float32Array(n);
 const R = new Float32Array(n);
 
-// Music enters only AFTER the intro, eases in slowly and stays low for the
-// rest of the film. MUSIC_START_FRAME is the first frame it is heard.
-const MUSIC_START_FRAME = CONNECTOR;
-const MUSIC_FADE_IN = 3.5;
-const MUSIC_FADE_OUT = 1.5;
 {
-  const music = decodeMp3(MUSIC_MP3);
-
-  // Skip any silent head/tail on the source so the fade-in starts on music.
-  const win = Math.floor(0.05 * SR);
-  const level = (at) => {
-    let sum = 0;
-    for (let i = at; i < Math.min(at + win, music.frames); i++) {
-      sum += (music.L[i] * music.L[i] + music.R[i] * music.R[i]) / 2;
-    }
-    return Math.sqrt(sum / win);
-  };
-  let bodyStart = 0;
-  while (bodyStart < music.frames && level(bodyStart) < 0.02) bodyStart += win;
-  let bodyEnd = music.frames - win;
-  while (bodyEnd > bodyStart && level(bodyEnd) < 0.02) bodyEnd -= win;
-  const bodyLen = bodyEnd - bodyStart;
-
-  const startSample = Math.floor(secOf(MUSIC_START_FRAME) * SR);
+  const music = decodeMp3(video.music);
+  const body = contentSpan(music);
+  const startSample = Math.floor(secOf(video.musicStartFrame) * SR);
   const need = n - startSample;
-  const xf = Math.floor(Math.min(0.35 * SR, bodyLen * 0.02));
+  const xf = Math.floor(Math.min(0.35 * SR, body.length * 0.02));
 
-  // Fill from the intro's end to the end of the film, looping only if the
-  // track is shorter than what is left to cover.
+  // Fill from the music's entry to the end, looping only if the source is
+  // shorter than the stretch it has to cover.
   let pos = startSample;
   let first = true;
   while (pos < n) {
-    for (let i = 0; i < bodyLen; i++) {
+    for (let i = 0; i < body.length; i++) {
       const j = pos + i;
       if (j >= n) break;
       let g = 1;
       if (!first && i < xf) g = i / xf;
-      if (i > bodyLen - xf) g = Math.min(g, (bodyLen - i) / xf);
-      L[j] += music.L[bodyStart + i] * g;
-      R[j] += music.R[bodyStart + i] * g;
+      if (i > body.length - xf) g = Math.min(g, (body.length - i) / xf);
+      L[j] += music.L[body.start + i] * g;
+      R[j] += music.R[body.start + i] * g;
     }
-    pos += bodyLen - xf;
+    pos += body.length - xf;
     first = false;
   }
 
-  // Level: measured over the stretch music actually plays, kept low so the
+  // Level the bed over the stretch it actually plays, kept low so the
   // effects stay clearly on top.
   let sum = 0;
   for (let i = startSample; i < n; i++) sum += (L[i] * L[i] + R[i] * R[i]) / 2;
   const rms = Math.sqrt(sum / need);
-  const target = 0.015;
-  const g = rms > 0 ? target / rms : 1;
+  const g = rms > 0 ? video.musicTargetRms / rms : 1;
   for (let i = startSample; i < n; i++) {
     L[i] *= g;
     R[i] *= g;
   }
 
   // Slow rise as it comes in, gentle fall at the very end.
-  const fadeIn = Math.floor(MUSIC_FADE_IN * SR);
+  const fadeIn = Math.floor(video.musicFadeIn * SR);
   for (let i = 0; i < fadeIn; i++) {
     const j = startSample + i;
     if (j >= n) break;
@@ -313,7 +234,7 @@ const MUSIC_FADE_OUT = 1.5;
     L[j] *= e;
     R[j] *= e;
   }
-  const fadeOut = Math.floor(MUSIC_FADE_OUT * SR);
+  const fadeOut = Math.floor(video.musicFadeOut * SR);
   for (let i = 0; i < fadeOut; i++) {
     const e = i / fadeOut;
     L[n - 1 - i] *= e;
@@ -321,43 +242,46 @@ const MUSIC_FADE_OUT = 1.5;
   }
 
   console.log(
-    `music: enters at frame ${MUSIC_START_FRAME} (${secOf(MUSIC_START_FRAME).toFixed(1)}s), ${MUSIC_FADE_IN}s fade-in, source ${(bodyLen / SR).toFixed(1)}s, gain x${g.toFixed(2)}`,
+    `music: enters at frame ${video.musicStartFrame} (${secOf(video.musicStartFrame).toFixed(1)}s), ${video.musicFadeIn}s fade-in, source ${(body.length / SR).toFixed(1)}s, gain x${g.toFixed(2)}`,
   );
 }
 
-const typingSample = decodeMp3(TYPING_MP3);
-const successSample = decodeMp3(SUCCESS_MP3);
-const clickSample = decodeMp3(CLICK_MP3);
+const typingSample = decodeMp3(SAMPLES.typing);
+const clickSample = decodeMp3(SAMPLES.click);
+const successSample = decodeMp3(SAMPLES.success);
+
 const bank = {
-  // Real mouse click; impact sits ~10ms in after trimming, well under a frame.
+  // Real mouse click; impact sits ~10ms in after trimming, under a frame.
   click: sampleClip(clickSample, 0.25, 0.06),
   chime: chime(),
   step: stepTick(),
-  // Supplied success sting, trimmed so its tail clears the scene.
+  // Supplied success sting, trimmed and softened so it sits with the bed.
   success: soften(sampleClip(successSample, 1.9, 0.9), 0.22),
-  // Two different stretches of the recording so the shots do not repeat.
-  typingIntro: typingFromSample(typingSample, (42 - 6) / FPS, 0.35),
-  typingPrompt: typingFromSample(typingSample, (132 - 30) / FPS, 2.6),
 };
+for (const [name, spec] of Object.entries(video.typingRuns ?? {})) {
+  bank[name] = typingFromSample(typingSample, spec.seconds, spec.from);
+}
 
 // Effects are lifted as a group so they sit clearly above the bed, and the
-// sparse ones - typing, ticks, transitions - get extra because their energy
-// is spread thinly across a window rather than concentrated in a hit.
+// sparse ones get extra because their energy is spread thinly across a
+// window rather than concentrated in a hit.
 const SFX_GAIN = 2.0;
 const SOUND_GAIN = {
   success: 1.0,
-  typingIntro: 1.35,
-  typingPrompt: 1.35,
   step: 1.9,
   click: 1.0,
   chime: 1.0,
 };
+// Typing runs are spread thinly over a window, so they need a lift the
+// per-hit sounds do not. Matched by prefix so each video can name its own.
+const gainFor = (sound) =>
+  SOUND_GAIN[sound] ?? (sound.startsWith("typing") ? 1.35 : 1);
 
-for (const cue of cues) {
+for (const cue of video.cues) {
   const src = bank[cue.sound];
   if (!src) throw new Error(`unknown sound: ${cue.sound}`);
   const off = Math.floor(secOf(cue.at) * SR);
-  const g = cue.gain * SFX_GAIN * (SOUND_GAIN[cue.sound] ?? 1);
+  const g = cue.gain * SFX_GAIN * gainFor(cue.sound);
   const stereo = !(src instanceof Float32Array);
   const srcL = stereo ? src.L : src;
   const srcR = stereo ? src.R : src;
@@ -371,7 +295,6 @@ for (const cue of cues) {
 }
 
 // Very short top and tail on the finished mix, just to avoid edge clicks.
-// The musical fade is applied to the bed above.
 const fade = Math.floor(0.08 * SR);
 for (let i = 0; i < fade; i++) {
   const g = i / fade;
@@ -381,9 +304,9 @@ for (let i = 0; i < fade; i++) {
   R[n - 1 - i] *= g;
 }
 
-// Soft-limit before normalising. The real keyboard sample has sharp
-// transients; without this they alone would set the ceiling and the
-// normaliser would pull the music and everything else down with it.
+// Soft-limit before normalising. Real keyboard transients are sharp; without
+// this they alone would set the ceiling and the normaliser would pull the
+// music and everything else down with them.
 {
   const knee = 0.8;
   for (let i = 0; i < n; i++) {
@@ -392,7 +315,6 @@ for (let i = 0; i < fade; i++) {
   }
 }
 
-// Lift to a normal listening level: peak just under -3dBFS.
 {
   let peak = 0;
   for (let i = 0; i < n; i++) {
@@ -412,7 +334,7 @@ for (let i = 0; i < fade; i++) {
 
 const writeWav = (file, left, right) => {
   const frames = left.length;
-  const bytes = frames * 4; // stereo 16-bit
+  const bytes = frames * 4;
   const buf = Buffer.alloc(44 + bytes);
   buf.write("RIFF", 0);
   buf.writeUInt32LE(36 + bytes, 4);
@@ -438,15 +360,7 @@ const writeWav = (file, left, right) => {
 
 // Per-scene tracks, sliced out of the master so a scene preview sounds
 // exactly like that stretch of the finished cut.
-const SCENES = [
-  { name: "IntroScene", from: INTRO, frames: 240 },
-  { name: "ConnectorScene", from: CONNECTOR, frames: 195 },
-  { name: "OpportunityPromptScene", from: PROMPT, frames: 270 },
-  { name: "OpportunityInsightsScene", from: INSIGHTS, frames: 420 },
-  { name: "OpportunityQuestionsScene", from: QUESTIONS, frames: 240 },
-  { name: "ClosingScene", from: CLOSING, frames: 120 },
-];
-for (const scene of SCENES) {
+for (const scene of video.scenes) {
   const start = Math.floor(secOf(scene.from) * SR);
   const len = Math.floor(secOf(scene.frames) * SR);
   writeWav(
@@ -456,7 +370,7 @@ for (const scene of SCENES) {
   );
 }
 
-writeWav(path.join(OUT, "full-audio.wav"), L, R);
+writeWav(path.join(OUT, `${video.audioTrack}.wav`), L, R);
 console.log(
-  `full-audio.wav  ${totalSeconds.toFixed(2)}s stereo  ${cues.length} cues  +${SCENES.length} scene tracks`,
+  `${video.audioTrack}.wav  ${totalSeconds.toFixed(2)}s stereo  ${video.cues.length} cues  +${video.scenes.length} scene tracks`,
 );

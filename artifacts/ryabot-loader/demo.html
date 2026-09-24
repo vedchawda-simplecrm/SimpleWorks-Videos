@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>R-YaBot loader</title>
+    <link rel="stylesheet" href="ryabot-loader.css" />
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        gap: 48px;
+        grid-auto-flow: column;
+        background: #fcf8f1;
+        font: 14px/1.5 system-ui, sans-serif;
+        color: #7a7368;
+      }
+      /* Checkerboard, so the cut-out can be verified at a glance. */
+      .checks {
+        background-image:
+          linear-gradient(45deg, #e6ddd0 25%, transparent 25%),
+          linear-gradient(-45deg, #e6ddd0 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #e6ddd0 75%),
+          linear-gradient(-45deg, transparent 75%, #e6ddd0 75%);
+        background-size: 20px 20px;
+        background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+      }
+      figure { margin: 0; display: grid; justify-items: center; gap: 12px; }
+      button {
+        font: inherit;
+        padding: 6px 14px;
+        border: 1px solid #ebe3d6;
+        border-radius: 8px;
+        background: #fff;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <figure class="checks">
+      <div class="ryabot-loader ryabot-loader--idle" style="--ryabot-size: 256px">
+        <div class="ryabot-loader__body">
+          <div class="ryabot-loader__pulses"><div class="ryabot-loader__ring"></div><div class="ryabot-loader__ring"></div><div class="ryabot-loader__ring"></div></div>
+          <img class="ryabot-loader__pose ryabot-loader__pose--standing" src="../../public/assets/images/ryabot-default.png" alt="" />
+          <img class="ryabot-loader__pose ryabot-loader__pose--meditating" src="../../public/assets/images/ryabot-thinking.png" alt="" />
+        </div>
+      </div>
+      <figcaption>idle loop (3.5s, seamless)</figcaption>
+    </figure>
+
+    <figure>
+      <div id="intro" class="ryabot-loader ryabot-loader--intro" style="--ryabot-size: 256px">
+        <div class="ryabot-loader__body">
+          <div class="ryabot-loader__pulses"><div class="ryabot-loader__ring"></div><div class="ryabot-loader__ring"></div><div class="ryabot-loader__ring"></div></div>
+          <img class="ryabot-loader__pose ryabot-loader__pose--standing" src="../../public/assets/images/ryabot-default.png" alt="" />
+          <img class="ryabot-loader__pose ryabot-loader__pose--meditating" src="../../public/assets/images/ryabot-thinking.png" alt="" />
+        </div>
+      </div>
+      <figcaption>settle then idle</figcaption>
+      <button onclick="const n=document.getElementById('intro');const c=n.cloneNode(true);n.replaceWith(c);c.id='intro'">
+        replay settle
+      </button>
+    </figure>
+
+    <figure>
+      <div class="ryabot-loader ryabot-loader--idle" style="--ryabot-size: 64px">
+        <div class="ryabot-loader__body">
+          <div class="ryabot-loader__pulses"><div class="ryabot-loader__ring"></div><div class="ryabot-loader__ring"></div><div class="ryabot-loader__ring"></div></div>
+          <img class="ryabot-loader__pose ryabot-loader__pose--standing" src="../../public/assets/images/ryabot-default.png" alt="" />
+          <img class="ryabot-loader__pose ryabot-loader__pose--meditating" src="../../public/assets/images/ryabot-thinking.png" alt="" />
+        </div>
+      </div>
+      <figcaption>64px, in-UI size</figcaption>
+    </figure>
+  </body>
+</html>
